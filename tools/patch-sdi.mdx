@@ -1,0 +1,151 @@
+---
+title: "patch_sdi.py: Build a Custom boot_patched.sdi File"
+sidebarTitle: "patch_sdi.py"
+description: "Reference for patch_sdi.py, the BitUnlocker script that appends a custom WIM to a stock boot.sdi and redirects the WIM blob offset to replace WinRE."
+---
+
+`patch_sdi.py` builds a modified SDI file by appending a custom `WinRE.wim` to a stock `boot.sdi` and patching the WIM blob entry in the blob table so that the Windows boot manager loads the custom WIM instead of the original. The stock `boot.sdi` is never touched — the script always writes a new output file.
+
+<Note>
+  The stock SDI is never modified. The script reads it, then creates a separate
+  patched copy at the output path you specify.
+</Note>
+
+## Usage
+
+```bash
+python patch_sdi.py --sdi boot.sdi --wim custom_winre.wim -o boot_patched.sdi
+```
+
+Full syntax:
+
+```text
+patch_sdi.py --sdi <path> --wim <path> [-o <output>]
+```
+
+## Arguments
+
+<ParamField path="--sdi" type="string" required>
+  Path to the stock `boot.sdi` file. This file is read but **never modified** —
+  a patched copy is written to the output path.
+</ParamField>
+
+<ParamField path="--wim" type="string" required>
+  Path to the custom WIM file to append — for example, a modified `WinRE.wim`
+  that has `cmd.exe` set as the launch application.
+</ParamField>
+
+<ParamField path="-o / --output" type="string" default="boot_patched.sdi">
+  Output path for the patched SDI file. Must differ from the input `--sdi`
+  path; the script exits with an error if both resolve to the same file.
+</ParamField>
+
+<Warning>
+  The output path must differ from the input SDI path. If `--sdi` and
+  `--output` resolve to the same absolute path, the script will exit with
+  `Error: output path must differ from input SDI path`.
+</Warning>
+
+## How it works
+
+<Steps>
+  <Step title="Read and validate the stock SDI">
+    The script reads the entire stock SDI into memory and checks that the first
+    eight bytes match the `$SDI0001` signature. A warning is printed if the
+    signature does not match, but execution continues.
+  </Step>
+
+  <Step title="Locate the WIM and PART blob entries">
+    The blob table lives at offset `0x200` and contains 64 entries of 64 bytes
+    each. The script scans those entries for the `WIM\x00` and `PART` type
+    tags. It exits with an error if either tag is not found.
+  </Step>
+
+  <Step title="Calculate an aligned append offset">
+    The append position is computed by rounding the stock SDI size **up** to
+    the next 4 KiB page boundary (`align_up(stock_size, 0x1000)`). Any gap
+    between the end of the stock SDI and that boundary is filled with null
+    bytes.
+  </Step>
+
+  <Step title="Copy the stock SDI and append the custom WIM">
+    The stock SDI is copied verbatim to the output path using
+    `shutil.copy2`. The padding bytes are then appended, followed by the
+    custom WIM in 1 MiB chunks.
+  </Step>
+
+  <Step title="Patch the WIM blob entry">
+    The script reopens the output file in read-write mode and writes two
+    64-bit little-endian values into the WIM blob entry:
+    - `data_offset` (at entry offset `0x10`) — set to the calculated append
+      position so the boot manager finds the custom WIM.
+    - `data_size` (at entry offset `0x18`) — set to the byte size of the
+      custom WIM file.
+  </Step>
+
+  <Step title="Print the ramdisk buffer layout summary">
+    After patching, the script prints a map showing where each region will
+    reside in the ramdisk buffer when the boot manager loads the SDI: the
+    header and blob table, the PART (NTFS) data, the appended custom WIM, and
+    the position of the trusted WIM that the boot manager hash-verifies but
+    does not actually boot from.
+  </Step>
+</Steps>
+
+## Example output
+
+```text
+[*] Stock SDI     : boot.sdi (5242880 bytes, 0x500000)
+[*] Custom WIM    : custom_winre.wim (314572800 bytes, 300.0 MiB)
+[*] Stock blob table:
+    PART entry #0 : offset=0x2000, size=0x4fe000 (5234688 bytes)
+    WIM  entry #1 : offset=0x2000, size=0x4fe000 (5234688 bytes)
+
+[*] Patch plan:
+    Append custom WIM at file offset 0x501000 (after 4096 bytes padding)
+    Set WIM blob offset to 0x501000 (= position in ramdisk buffer)
+    Set WIM blob size to 0x12c00000 (314572800 bytes)
+    New file size: 319819776 bytes (304.9 MiB)
+
+[*] Copying stock SDI to boot_patched.sdi...
+[*] Appending custom WIM...
+[*] Patching WIM blob entry (slot #1)...
+
+[+] Patched SDI written: boot_patched.sdi (319819776 bytes)
+
+[*] Ramdisk buffer layout at boot time:
+    0x00000000  SDI header + blob table
+    0x00002000  PART data (NTFS volume, 5234688 bytes)
+    0x00501000  Custom WIM (appended, 314572800 bytes) <-- WIM blob points here
+    0x13101000  Trusted WIM (loaded separately by boot loader)
+               ^-- hash verified on this one, but NOT booted
+
+[+] Done! Replace boot.sdi with this file and reboot into WinRE.
+[+] Verify with: python parse_sdi.py boot_patched.sdi
+```
+
+## Verify the result
+
+After patching, run `parse_sdi.py` on the output file to confirm the blob
+table is correct before booting:
+
+```bash
+python parse_sdi.py boot_patched.sdi
+```
+
+Check that the WIM entry offset matches `0x501000` (or whatever append offset
+was printed in the patch plan), that the WIM entry size matches your custom WIM
+file size, and that no `WARNING: extends past EOF` lines appear. See
+[parse_sdi.py](/tools/parse-sdi) for full details on the output.
+
+## Getting a custom WinRE.wim
+
+The custom WIM must have `cmd.exe` configured as the WinRE launch application
+so that a command prompt opens automatically after the SDI is loaded, giving
+access to the decrypted OS volume. Building a custom WIM requires mounting and
+modifying a stock `WinRE.wim`.
+
+If you do not want to build your own, the pre-built `boot_patched.sdi`
+available in the project Releases already contains a WIM with `cmd.exe` set as
+the launch application — download it and place it directly in `USB/sdi/` or
+`TFTP-root/sdi/` without running this script.

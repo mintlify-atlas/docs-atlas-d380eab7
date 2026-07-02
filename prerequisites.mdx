@@ -1,0 +1,105 @@
+---
+title: "Prerequisites for the BitUnlocker Downgrade Attack"
+sidebarTitle: "Prerequisites"
+description: "What you need before running BitUnlocker: physical access, Secure Boot PCA 2011 trust, a USB stick or Linux PXE machine, and the boot_patched.sdi file."
+---
+
+Before attempting the BitUnlocker downgrade attack you must confirm that the target meets a specific set of conditions and that you have the necessary hardware and files prepared. Missing any one of these requirements will cause the attack to fail — or, in the case of the authorization requirement, make it illegal. Work through each prerequisite below before proceeding to the walkthrough pages.
+
+<Note>
+  **Authorized use only.** This tool and all accompanying documentation are provided strictly for authorized security testing and research purposes. Only use BitUnlocker on systems you own or have explicit written permission to test. Unauthorized access to computer systems is illegal.
+</Note>
+
+<Steps>
+  <Step title="Physical access to the target">
+    You must be able to physically interact with the target machine: plugging in a USB stick or connecting it to your Linux machine over Ethernet, and triggering a boot from a non-default device (USB stick or PXE). This typically means pressing the manufacturer's boot menu key at power-on (F12, F9, etc.) or using the **Use a device** option inside WinRE.
+
+    Note that USB-C or Thunderbolt-only devices require a USB-C drive (for the USB method) or a USB-C to Ethernet adapter (for the PXE method).
+  </Step>
+  <Step title="Target configuration check">
+    The attack works against the default Windows 11 consumer BitLocker configuration: **TPM-only** with **PCR 7 + PCR 11** in the sealing policy. If the target uses any of the following, the attack will not succeed (or will require additional information):
+
+    - **TPM + PIN** where the PIN is unknown — the TPM will not unseal the VMK.
+    - **TPM + key file** — additional authenticator is required.
+    - **Non-default PCR policy** — if PCR 0, 2, or 4 are included in the policy, the change in boot path will be detected and the VMK will not be released.
+
+    If TPM + PIN is configured and you know the PIN, the attack is partially possible: a blue screen will appear during boot, and you can type the PIN blindly and press Enter to continue.
+  </Step>
+  <Step title="Verify PCA 2011 trust on the target">
+    The Secure Boot database on the target must still trust the **Microsoft Windows PCA 2011** certificate. Machines that have applied **KB5025885** or that were freshly installed since early 2026 may have migrated to **Windows UEFI CA 2023**, making the pre-patch `bootmgfw.efi` untrusted and the downgrade ineffective.
+
+    To verify which certificate signs the active boot manager, mount the EFI system partition and inspect the binary:
+
+    ```powershell
+    mountvol S: /s
+    sigcheck -i S:\EFI\Microsoft\Boot\bootmgfw.efi
+    ```
+
+    If the output shows the binary is signed under **Microsoft Windows PCA 2011**, the system is likely vulnerable.
+
+    <Tip>
+      Always check the copy on the EFI system partition (`S:\EFI\Microsoft\Boot\bootmgfw.efi`), not the one at `C:\Windows\Boot\EFI\bootmgfw.efi`. These two files are not guaranteed to be identical — only the EFI partition copy is the one actually executed at boot.
+    </Tip>
+  </Step>
+  <Step title="USB method requirements">
+    For the USB delivery method you need:
+
+    - A USB stick of any capacity that can be formatted as **FAT32**.
+    - The `boot_patched.sdi` file — either downloaded from the GitHub Releases page or built with `patch_sdi.py` (see [Build SDI](/tools/patch-sdi)).
+    - A modified `BCD` file prepared on the target (covered in the USB walkthrough).
+
+    The USB stick must be formatted FAT32 so that the UEFI firmware can read the `bootx64.efi` file from `EFI/Boot/`. NTFS and exFAT are not readable by most UEFI implementations without additional drivers.
+  </Step>
+  <Step title="PXE method requirements">
+    For the PXE delivery method you need:
+
+    - A **Linux machine** with `dnsmasq` installed.
+    - An **Ethernet cable** to connect the Linux machine directly to the target (or through a switch).
+    - A network interface on the Linux machine that can be assigned a static IP.
+    - The `boot_patched.sdi` file placed in `TFTP-root/sdi/`.
+
+    The PXE server is started with a single `dnsmasq` command — no DHCP infrastructure is required. However, because `boot_patched.sdi` is approximately **300 MB**, the transfer over TFTP will take several minutes. The target screen will display a recovery-related message with the SDI path during the transfer.
+
+    ```bash
+    cd BitUnlocker
+    export INTERFACE=<your-interface>
+    export ABS_TFTP_ROOT=$(pwd)/TFTP-root
+
+    sudo ifconfig $INTERFACE 10.13.37.1
+    sudo dnsmasq --no-daemon \
+      --interface="$INTERFACE" \
+      --dhcp-range=10.13.37.100,10.13.37.101,255.255.255.0,1h \
+      --dhcp-boot=bootmgfw.efi \
+      --enable-tftp \
+      --tftp-root="$ABS_TFTP_ROOT" \
+      --log-dhcp \
+      --tftp-max=65464 \
+      --port=0
+    ```
+
+    If the TFTP transfer fails with a "file not found" error (other than harmless Font file requests), check that the file names on the TFTP server match exactly what the target requests — TFTP paths are case-sensitive.
+  </Step>
+</Steps>
+
+<Warning>
+  If **KB5025885** has been applied or the machine was freshly installed since early 2026, it likely ships with a CA 2023-signed `bootmgfw.efi`. In that case the UEFI firmware will reject the pre-patch PCA 2011-signed binary and the attack will not work. A blue screen that cannot be resolved by typing a PIN is a strong indicator that the target has already migrated to CA 2023.
+</Warning>
+
+## Getting boot_patched.sdi
+
+You need the `boot_patched.sdi` file before you can proceed with either delivery method. There are two ways to obtain it:
+
+<Accordion title="Download from GitHub Releases (recommended)">
+  The pre-built `boot_patched.sdi` is available on the [GitHub Releases page](https://github.com/garatc/BitUnlocker/releases). This file contains a modified `WinRE.wim` where the WinRE launch application has been replaced with `cmd.exe`. Download it and place it in the correct location for your chosen method:
+
+  - **USB method:** `USB/sdi/boot_patched.sdi`
+  - **PXE method:** `TFTP-root/sdi/boot_patched.sdi`
+
+  No Python installation or build tooling is required.
+</Accordion>
+
+<Accordion title="Build your own with patch_sdi.py">
+  If you want to customise the WIM or use a different `WinRE.wim` source, you can build the SDI yourself using the `patch_sdi.py` script included in the `scripts/` directory. See [Build SDI](/tools/patch-sdi) for full instructions.
+
+  Building your own SDI requires a `boot.sdi` base file and a `WinRE.wim` image. The script appends the WIM blob to the base SDI to produce `boot_patched.sdi`.
+</Accordion>

@@ -1,0 +1,78 @@
+---
+title: "USB Boot: Deliver the BitUnlocker Attack via USB Stick"
+sidebarTitle: "USB Boot"
+description: "Prepare a FAT32 USB stick with the pre-patch bootmgfw.efi, modified BCD, and boot_patched.sdi, then trigger a UEFI USB boot on the target machine."
+---
+
+The USB delivery method is the recommended approach for the BitUnlocker attack. It requires only a FAT32-formatted USB stick, works entirely offline, and takes under 5 minutes to execute once the stick is prepared. The repository's `USB/` directory already contains the pre-patch `bootx64.efi` (signed under PCA 2011) and the correct EFI directory structure — you only need to add the modified BCD and `boot_patched.sdi`.
+
+## USB Stick Layout
+
+After completing the [Prepare SDI](/walkthrough/prepare-sdi) and [Modify BCD](/walkthrough/modify-bcd) steps, your USB stick should contain the following structure:
+
+```text
+USB stick root/
+├── EFI/
+│   ├── Boot/
+│   │   └── bootx64.efi        # Pre-patch boot manager (PCA 2011)
+│   └── Microsoft/
+│       └── Boot/
+│           └── BCD             # Your modified BCD
+└── sdi/
+    └── boot_patched.sdi        # Patched SDI with custom WinRE
+```
+
+The `bootx64.efi` binary and the `EFI/Boot/` directory structure are already present in the repository's `USB/` directory. Once you have [modified the BCD](/walkthrough/modify-bcd), place the resulting `BCD` file at `USB/EFI/Microsoft/Boot/BCD` and `boot_patched.sdi` at `USB/sdi/boot_patched.sdi`.
+
+## Format and Copy Files
+
+1. Format the USB stick as **FAT32**.
+2. Copy the **contents** of the `USB/` directory to the root of the USB stick. Do not copy the `USB/` folder itself — the `EFI/` and `sdi/` directories should sit directly at the root of the drive.
+
+## Trigger a UEFI USB Boot
+
+<Steps>
+
+  <Step title="Plug in the USB stick">
+    Insert the prepared USB stick into any available USB port on the target machine.
+
+    <Tip>
+      If the target has only USB-C or Thunderbolt ports, use a USB-C drive or a USB-C to USB-A adapter.
+    </Tip>
+  </Step>
+
+  <Step title="Trigger a UEFI boot from the USB stick">
+    There are two ways to trigger the boot:
+
+    - **From WinRE:** In the recovery menu, choose **Use a device** and select the USB stick.
+    - **At power-on:** Press the manufacturer's one-time boot menu key as the machine starts (commonly **F12**, **F9**, or **F11**) and select the USB stick from the list.
+  </Step>
+
+  <Step title="If the USB stick does not appear in the boot menu">
+    Some UEFI firmware implementations do not list unrecognised removable media automatically. Look for a **"Boot from file"** option in the UEFI boot menu, then browse to `EFI/Boot/bootx64.efi` on the USB stick and select it.
+
+    <Note>
+      UEFI firmware and TFTP servers treat file names as case-sensitive. If you encounter a "file not found" error for any file other than font files (which are non-critical and can be ignored), check the capitalisation of the file name against what the firmware requests and rename accordingly.
+    </Note>
+  </Step>
+
+  <Step title="Wait for the SDI to load">
+    The pre-patch boot manager reads the modified BCD and begins loading `boot_patched.sdi`. A recovery-related message showing the SDI path will appear on screen. The SDI file is approximately 300 MB, so loading takes a moment even from USB.
+  </Step>
+
+  <Step title="Access the decrypted volume">
+    Once the SDI finishes loading, a command prompt appears. The TPM will have already unsealed the BitLocker volume master key, so the OS volume is decrypted and should be mounted automatically — typically as `C:` or `E:`.
+
+    If the volume is not mounted automatically, use `diskpart` to assign it a letter:
+
+    ```bat
+    diskpart
+    sel vol X
+    assign letter=C
+    exit
+    ```
+
+    Replace `X` with the volume number that corresponds to the encrypted OS partition (identified by its size).
+  </Step>
+
+</Steps>

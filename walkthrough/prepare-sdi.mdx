@@ -1,0 +1,55 @@
+---
+title: "Prepare the Patched SDI File for BitUnlocker"
+sidebarTitle: "Prepare SDI"
+description: "How to obtain or build the boot_patched.sdi file used by BitUnlocker: download from Releases or build with patch_sdi.py from a stock boot.sdi and WinRE.wim."
+---
+
+`boot_patched.sdi` is the core of the BitUnlocker attack. It is a Windows SDI (System Deployment Image) ramdisk image containing a modified WIM that launches `cmd.exe` in place of the real Windows Recovery Environment. When the boot manager loads this image instead of the legitimate `boot.sdi`, the target machine boots into an unrestricted command prompt with the BitLocker-protected volume already decrypted by the TPM.
+
+## Option A — Download from Releases
+
+The simplest path is to download the pre-built `boot_patched.sdi` directly from the [GitHub Releases page](https://github.com/garatc/BitUnlocker/releases). Once downloaded, place it in the correct location for your delivery method:
+
+- **USB method:** `USB/sdi/boot_patched.sdi`
+- **PXE method:** `TFTP-root/sdi/boot_patched.sdi`
+
+<Note>
+  The pre-built `boot_patched.sdi` available on the Releases page contains a modified `WinRE.wim` where the launch application has been replaced with `cmd.exe`. No further modification is needed before placing it in the appropriate directory.
+</Note>
+
+## Option B — Build Your Own
+
+If you prefer to build the SDI file yourself — for example, to use a specific WinRE version or a custom payload — two helper scripts are included in the `scripts/` directory of the repository.
+
+**What you need:**
+
+- A stock `boot.sdi` file (obtainable from Windows installation media or from the `EFI` partition of any Windows 11 machine)
+- A custom `WinRE.wim` file where the launch application has been replaced with `cmd.exe`
+
+**Build the patched SDI:**
+
+```bash
+python patch_sdi.py --sdi boot.sdi --wim custom_winre.wim -o boot_patched.sdi
+```
+
+**Verify the result:**
+
+```bash
+python parse_sdi.py boot_patched.sdi
+```
+
+`parse_sdi.py` prints the structure and content of the SDI file so you can confirm the embedded WIM is the one you intended.
+
+## Place the SDI File
+
+After obtaining or building `boot_patched.sdi`, place it in the path that matches your chosen delivery method:
+
+| Method | Destination path |
+|--------|-----------------|
+| USB    | `USB/sdi/boot_patched.sdi` |
+| PXE    | `TFTP-root/sdi/boot_patched.sdi` |
+
+## Next Steps
+
+- For detailed documentation on each script, see the [patch\_sdi.py reference](/tools/patch-sdi) and the [parse\_sdi.py reference](/tools/parse-sdi).
+- Once the SDI file is in place, proceed to [Modify the BCD](/walkthrough/modify-bcd) to redirect the boot manager to load your patched image.

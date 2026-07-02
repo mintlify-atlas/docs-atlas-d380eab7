@@ -1,0 +1,53 @@
+---
+title: "BitUnlocker: CVE-2025-48804 BitLocker Downgrade Attack"
+sidebarTitle: "Introduction"
+description: "BitUnlocker is a PoC downgrade attack that accesses BitLocker-encrypted disks in under 5 minutes on fully patched Windows 11 by exploiting a signed pre-patch boot manager."
+---
+
+BitUnlocker is a proof-of-concept tool that demonstrates how a boot manager downgrade attack can access BitLocker-encrypted disks **in under 5 minutes** on fully patched Windows 11 machines. It is intended for security researchers and penetration testers who need to understand, reproduce, and ultimately mitigate the class of vulnerability described in CVE-2025-48804. By leveraging a legitimately signed but pre-patch boot manager binary, an attacker with physical access can bypass BitLocker without knowing the recovery key — exposing the full OS volume via a modified WinRE environment.
+
+## CVE-2025-48804 Overview
+
+The July 2025 patch addresses the SDI vulnerability by updating `bootmgfw.efi`. However, any pre-patch copy of `bootmgfw.efi` that was signed under the **Microsoft Windows PCA 2011** certificate chain remains cryptographically valid as far as Secure Boot is concerned — provided the target system's Secure Boot database (DB) still trusts PCA 2011. This trust relationship is the root of the downgrade: an attacker can substitute the modern, patched boot manager with an older, vulnerable one and the firmware will happily execute it.
+
+The result is that the pre-patch boot manager loads a maliciously crafted SDI ramdisk image containing a modified WinRE environment (with `cmd.exe` as the launch application), the TPM unseals the BitLocker Volume Master Key (VMK) because the PCR measurements still satisfy the policy, and the encrypted OS volume is mounted and accessible from the command prompt.
+
+This work builds entirely on the original research by **Microsoft STORM** (Netanel Ben Simon and Alon Leviev): [BitUnlocker: Leveraging Windows Recovery to Extract BitLocker Secrets](https://techcommunity.microsoft.com/blog/microsoft-security-blog/bitunlocker-leveraging-windows-recovery-to-extract-bitlocker-secrets/4442806).
+
+<Note>
+  **Authorized use only.** This tool and all accompanying documentation are provided strictly for authorized security testing and research purposes. Only use BitUnlocker on systems you own or have explicit written permission to test. Unauthorized access to computer systems is illegal. The author assumes no liability for any misuse or damage resulting from the use of this material.
+</Note>
+
+## Delivery Methods
+
+BitUnlocker supports two delivery methods. The USB method is simpler and recommended for most engagements. The PXE method is useful when USB booting is unavailable or impractical.
+
+<CardGroup cols={2}>
+  <Card title="USB Boot" icon="usb-drive" href="/walkthrough/usb-boot">
+    Format a USB stick as FAT32, copy the pre-built directory structure, and trigger a UEFI USB boot on the target. Recommended for most assessments.
+  </Card>
+  <Card title="PXE Boot" icon="network-wired" href="/walkthrough/pxe-boot">
+    Serve the boot manager and SDI file over TFTP using `dnsmasq` on a Linux machine connected via Ethernet. Useful when USB is not an option.
+  </Card>
+</CardGroup>
+
+## SDI Tooling
+
+The `scripts/` directory contains two Python utilities for working with SDI ramdisk images. Use them to build a custom `boot_patched.sdi` or to inspect an existing one.
+
+<CardGroup cols={2}>
+  <Card title="Build SDI" icon="screwdriver-wrench" href="/tools/patch-sdi">
+    `patch_sdi.py` — builds a modified SDI file from a `boot.sdi` and a `WinRE.wim`, replacing the WIM blob with a custom one that launches `cmd.exe`.
+  </Card>
+  <Card title="Parse SDI" icon="magnifying-glass" href="/tools/parse-sdi">
+    `parse_sdi.py` — parses an SDI file to validate its internal structure and inspect the blobs it contains.
+  </Card>
+</CardGroup>
+
+## Pre-built Release
+
+The pre-built release available on the GitHub Releases page includes a ready-to-use `boot_patched.sdi` file. This SDI contains a modified `WinRE.wim` where the WinRE launch application has been replaced with `cmd.exe`. Download it and place it in `USB/sdi/` (for USB method) or `TFTP-root/sdi/` (for PXE method) — no Python or build tooling required.
+
+<Warning>
+  BitUnlocker must only be used on systems you own or have explicit written authorization to test. Deploying this tool against a system without permission constitutes unauthorized computer access and is a criminal offence in most jurisdictions. The authors and contributors accept no responsibility for illegal or unethical use.
+</Warning>

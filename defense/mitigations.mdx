@@ -1,0 +1,88 @@
+---
+title: "Mitigating the CVE-2025-48804 BitLocker Downgrade Attack"
+sidebarTitle: "Mitigations"
+description: "How to protect Windows systems from CVE-2025-48804: enable TPM+PIN, apply KB5025885, migrate to Windows UEFI CA 2023, and review BitLocker PCR policy."
+---
+
+Several mitigations can prevent the BitUnlocker downgrade attack from succeeding. They range from short-term operational controls — such as enabling a TPM startup PIN — to long-term remediation that closes the underlying vulnerability by migrating the EFI boot manager to a CA 2023-signed binary and revoking trust in the old PCA 2011 certificate. Organizations should prioritize the CA 2023 migration as the definitive fix, while using TPM+PIN as an immediate compensating control for systems that cannot be patched right away.
+
+## Primary mitigations
+
+<CardGroup cols={2}>
+  <Card title="Enable TPM + PIN" icon="lock">
+    Configuring BitLocker with a pre-boot startup PIN prevents the TPM from unsealing the VMK without user interaction at boot, regardless of which boot manager loads. Even if an attacker successfully delivers the patched SDI, the PIN challenge will block access to the encrypted volume. Note that a PIN alone will not stop an insider who already knows it — additional mitigations should be layered for high-risk environments.
+  </Card>
+  <Card title="Apply KB5025885" icon="shield-check">
+    Install KB5025885 and complete the three-phase Secure Boot migration to revoke trust in the old PCA 2011-signed boot manager. Once revoked, the downgrade binary that BitUnlocker relies on cannot execute — Secure Boot will reject it before any SDI transfer begins.
+  </Card>
+  <Card title="Migrate to CA 2023" icon="certificate">
+    Migrate the `bootmgfw.efi` on the EFI partition to a binary signed under the Windows UEFI CA 2023 certificate. Systems freshly installed since early 2026 likely ship with a CA 2023-signed boot manager by default. On older systems, the KB5025885 migration process performs this update as part of its third phase.
+  </Card>
+  <Card title="Review PCR Policy" icon="microchip">
+    Including PCR 0, 2, or 4 in the BitLocker PCR validation profile means any change to firmware state or boot configuration — including a boot manager downgrade — will alter those PCR measurements and prevent the TPM from unsealing the VMK. Review the active PCR policy with `manage-bde -protectors -get C:` and extend it to cover these registers if not already present.
+  </Card>
+</CardGroup>
+
+<Warning>
+TPM+PIN alone does not prevent an insider with PIN knowledge from carrying out this attack. For the highest assurance, combine TPM+PIN with full CA 2023 migration via KB5025885. The PIN serves as a compensating control; the CA 2023 migration closes the underlying vulnerability.
+</Warning>
+
+## Detailed guidance
+
+### TPM + PIN setup
+
+BitLocker startup PIN support requires a Group Policy change before it can be configured on most Windows 11 systems. Open the Group Policy Editor (`gpedit.msc`) and navigate to:
+
+```
+Computer Configuration
+  → Administrative Templates
+    → Windows Components
+      → BitLocker Drive Encryption
+        → Operating System Drives
+```
+
+Enable **"Require additional authentication at startup"** and set the TPM startup PIN option to **"Require startup PIN with TPM"**. Optionally, configure a minimum PIN length under the **"Configure minimum PIN length for startup"** policy (the default minimum is 6 digits).
+
+After applying the policy, run the following to add a startup PIN to an existing BitLocker-protected volume:
+
+```bat
+manage-bde -protectors -add C: -TPMAndPIN
+```
+
+Windows will prompt for the PIN twice to confirm. On next reboot, the startup PIN prompt will appear before the OS loads.
+
+### KB5025885 migration
+
+Microsoft's KB5025885 guidance describes a three-phase process for revoking the old PCA 2011-signed boot manager via Secure Boot policy:
+
+<Steps>
+  <Step title="Install the update">
+    Apply KB5025885 (or a later cumulative update that supersedes it) through Windows Update or WSUS. The update itself does not complete the migration automatically — the subsequent phases must be triggered manually or via policy.
+  </Step>
+  <Step title="Revoke the old boot manager">
+    Follow the KB article to apply the Secure Boot revocation that distrusts the PCA 2011-signed `bootmgfw.efi`. This is the critical step that prevents the downgrade binary from being accepted by Secure Boot firmware.
+  </Step>
+  <Step title="Update the EFI partition">
+    The final phase updates `bootmgfw.efi` on the EFI partition to the CA 2023-signed version. After this step, the system boots exclusively under the new certificate chain and the old binary is fully blocked.
+  </Step>
+</Steps>
+
+Full instructions are available in the Microsoft support article:
+[KB5025885 — How to manage the Windows Boot Manager revocations for Secure Boot changes associated with CVE-2023-24932](https://support.microsoft.com/en-us/topic/kb5025885-how-to-manage-the-windows-boot-manager-revocations-for-secure-boot-changes-associated-with-cve-2023-24932-41a975df-beb2-40c1-99a3-b3ff139f832d)
+
+### Verify migration status
+
+After completing the KB5025885 migration, confirm that the EFI partition is running the CA 2023-signed binary. Mount the EFI system partition and inspect the file with Sysinternals `sigcheck`:
+
+```bat
+mountvol S: /s
+sigcheck -i S:\EFI\Microsoft\Boot\bootmgfw.efi
+```
+
+Review the **Signing date** and **Signer** fields in the output. If the signer shown is **"Microsoft Windows UEFI CA 2023"**, the migration is complete and the system is no longer vulnerable to the PCA 2011 downgrade attack.
+
+If the signer still shows **"Microsoft Windows Production PCA 2011"**, the EFI partition has not yet been updated and the system remains vulnerable.
+
+<Note>
+`C:\Windows\Boot\EFI\bootmgfw.efi` may differ from the copy on the EFI partition. The OS-volume copy is not the binary executed at boot — always inspect `S:\EFI\Microsoft\Boot\bootmgfw.efi` (after mounting with `mountvol S: /s`) to determine the true boot-time signing status.
+</Note>

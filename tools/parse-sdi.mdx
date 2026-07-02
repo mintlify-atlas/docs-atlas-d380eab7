@@ -1,0 +1,137 @@
+---
+title: "parse_sdi.py: Inspect and Validate an SDI File"
+sidebarTitle: "parse_sdi.py"
+description: "Reference for parse_sdi.py, which parses a Windows SDI ramdisk file and displays its header, blob table entries, and file layout map for validation."
+---
+
+`parse_sdi.py` parses a Windows SDI (System Deployment Image) file and prints its header, all non-empty blob table entries, and a layout map of every region in the file. It is primarily useful for validating a patched SDI produced by `patch_sdi.py` before booting, confirming that offsets and sizes in the blob table are correct and that no entry extends past the end of the file.
+
+## Usage
+
+```bash
+python parse_sdi.py <path_to_boot.sdi>
+```
+
+## Arguments
+
+<ParamField path="<path_to_boot.sdi>" type="string" required>
+  Path to the SDI file to inspect. Can be the stock `boot.sdi` or a patched
+  file such as `boot_patched.sdi`.
+</ParamField>
+
+## SDI file format
+
+The SDI format used by the Windows boot manager is structured as follows:
+
+- **Header (512 bytes, offset `0x000`)** — begins with the 8-byte ASCII
+  signature `$SDI0001`. The parser reads this field and reports whether it is
+  valid.
+
+- **Blob table (4 096 bytes, offset `0x200`)** — an array of 64 entries, each
+  64 bytes wide. Each entry describes one data blob stored elsewhere in the
+  file:
+
+  | Field | Size | Offset in entry | Description |
+  |---|---|---|---|
+  | Type tag | 4 bytes ASCII | `0x00` | Identifies the blob type |
+  | Attributes | `uint64` LE | `0x08` | Flags (type-specific) |
+  | Data offset | `uint64` LE | `0x10` | Absolute file offset of blob data |
+  | Data size | `uint64` LE | `0x18` | Byte size of blob data |
+  | Blob ID | `uint64` LE | `0x20` | Numeric identifier |
+
+  Known type tags:
+
+  | Tag | Meaning |
+  |---|---|
+  | `PART` | Raw partition image (NTFS volume) |
+  | `WIM\x00` | Windows Imaging Format — the WinRE image |
+  | `BOOT` | Boot code |
+
+- **Data blobs** — stored after the blob table. The first data blob starts at
+  the next 8 KiB-aligned boundary (`DATA_ALIGNMENT = 0x2000`) after the blob
+  table. Any gap between the end of the blob table and the first data blob is
+  reported as padding in the layout map.
+
+## Example output
+
+The following output is from parsing a patched SDI that has a custom WIM
+appended at offset `0x501000`:
+
+```text
+==============================================================================
+  SDI FILE ANALYSIS: boot_patched.sdi
+  File size: 304.9 MiB (319819776 bytes / 0x13101000)
+==============================================================================
+
+-- HEADER (512 bytes) --
+  Signature : b'$SDI0001'
+  Valid     : Yes
+  Hex (first 64 bytes):
+    24 53 44 49 30 30 30 31 ...  |$SDI0001...|
+
+-- BLOB TABLE at 0x0200 (64 entries, 2 non-empty) --
+
+  Entry #0:
+    Type tag   : b'PART'  ->  PART (raw partition image)
+    Attributes : 0x0000000000000001
+    Offset     : 0x00002000  (8192)
+    Size       : 0x004fe000  (5.0 MiB)
+    Blob ID    : 1
+    Detected   : NTFS volume (boot sector)
+
+  Entry #1:
+    Type tag   : b'WIM\x00'  ->  WIM (Windows Imaging Format)
+    Attributes : 0x0000000000000001
+    Offset     : 0x00501000  (5246976)
+    Size       : 0x12c00000  (300.0 MiB)
+    Blob ID    : 2
+    Detected   : WIM image (MSWIM signature)
+
+(62 empty entries skipped)
+
+-- LAYOUT MAP --
+  0x00000000 - 0x000001ff  Header (512 B)
+  0x00000200 - 0x000011ff  Blob table (4 KiB)
+  0x00001200 - 0x00001fff  Padding (3.5 KiB)
+  0x00002000 - 0x004fffff  PART (5.0 MiB)
+  0x00501000 - 0x130fffff  WIM (300.0 MiB)
+  0x13101000              EOF
+```
+
+## What to check after patching
+
+<Tip>
+  Always run `parse_sdi.py` after running `patch_sdi.py` to confirm the blob
+  table is correct before booting. A misconfigured offset will cause the boot
+  manager to load garbage instead of your WIM.
+</Tip>
+
+<Steps>
+  <Step title="Confirm the signature is valid">
+    Look for `Valid: Yes` in the header section. If you see
+    `NO - expected b'$SDI0001'`, the file header has been corrupted.
+  </Step>
+
+  <Step title="Check the WIM entry offset">
+    The `Offset` shown for the `WIM\x00` entry must match the append position
+    that `patch_sdi.py` printed in its patch plan (e.g. `0x00501000`).
+  </Step>
+
+  <Step title="Check the WIM entry size">
+    The `Size` shown for the `WIM\x00` entry must equal the byte size of your
+    custom `WinRE.wim` file.
+  </Step>
+
+  <Step title="Check for EOF overruns">
+    Confirm there are no `WARNING: extends past EOF` lines in the output. Such
+    a warning means a blob entry claims data beyond the end of the file, which
+    will cause the boot to fail.
+  </Step>
+
+  <Step title="Confirm the WIM magic is detected">
+    The line `Detected: WIM image (MSWIM signature)` under the WIM entry
+    confirms that the parser was able to read the first four bytes of the
+    appended WIM and found the expected `MSWI` magic. If this line is absent,
+    the offset is likely wrong.
+  </Step>
+</Steps>

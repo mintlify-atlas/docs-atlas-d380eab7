@@ -1,0 +1,52 @@
+---
+title: "Credits & Attribution for BitUnlocker Research"
+sidebarTitle: "Credits"
+description: "BitUnlocker is built on original research by Microsoft STORM. Full attribution, CVE reference, upstream blog post, and license information."
+---
+
+BitUnlocker is a proof-of-concept implementation built entirely on original research by Microsoft STORM. The discovery of CVE-2025-48804, the analysis of the SDI vulnerability in `bootmgfw.efi`, and the technique of leveraging Windows Recovery to extract BitLocker secrets were all documented and disclosed by the researchers listed below. This repository exists to demonstrate the practical impact of their findings in a controlled, reproducible way for the security research community.
+
+## Original research
+
+The vulnerability and exploitation technique were first published by **Netanel Ben Simon** and **Alon Leviev** of Microsoft STORM.
+
+<Card title="BitUnlocker: Leveraging Windows Recovery to Extract BitLocker Secrets" icon="book-open">
+  **Authors:** Netanel Ben Simon and Alon Leviev — Microsoft STORM
+
+  **Publication:** Microsoft Security Blog (techcommunity.microsoft.com)
+
+  **CVE:** CVE-2025-48804
+
+  The blog post describes how a pre-patch `bootmgfw.efi` binary signed under the Microsoft Windows PCA 2011 certificate can be used to trigger Windows Recovery in a way that causes the TPM to unseal the BitLocker VMK and mount the encrypted OS volume in a controlled WinRE environment — bypassing BitLocker on fully patched Windows 11 systems in under five minutes with physical access.
+</Card>
+
+## CVE details
+
+The table below summarizes the key attributes of the vulnerability as documented in the original research and associated advisory.
+
+| Field | Detail |
+|---|---|
+| **CVE ID** | CVE-2025-48804 |
+| **Affected component** | Windows Boot Manager (`bootmgfw.efi`) |
+| **Fixed in** | July 2025 patch |
+| **Attack vector** | Physical access — downgrade delivered via USB boot or PXE |
+| **Prerequisites** | TPM-only BitLocker (PCR 7 + 11); Secure Boot still trusting Microsoft Windows PCA 2011 |
+| **Impact** | Bypasses BitLocker full-volume encryption; OS volume decrypted and mounted without the recovery key |
+
+## Repository
+
+This proof-of-concept implementation is maintained by **garatc** and is available at [https://github.com/garatc/BitUnlocker](https://github.com/garatc/BitUnlocker).
+
+| Field | Detail |
+|---|---|
+| **Author** | garatc |
+| **License** | MIT |
+| **Repository** | https://github.com/garatc/BitUnlocker |
+
+<Warning>
+This repository and all its contents are provided strictly for authorized security testing and research purposes. Only use this tool on systems you own or have explicit written permission to test. Unauthorized access to computer systems is illegal. The author assumes no liability for any misuse or damage resulting from the use of this material.
+</Warning>
+
+<Note>
+This project is licensed under the **MIT License**. See the `LICENSE` file in the repository root for the full license text and terms of use.
+</Note>

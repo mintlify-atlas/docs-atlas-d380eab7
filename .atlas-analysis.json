@@ -1,0 +1,69 @@
+{
+  "projectType": "general",
+  "projectName": "BitUnlocker",
+  "projectDescription": "A proof-of-concept downgrade attack (CVE-2025-48804) that gains access to BitLocker-encrypted disks on fully patched Windows 11 machines by exploiting a signed pre-patch boot manager via USB or PXE boot.",
+  "theme": "aspen",
+  "primaryColor": "#f88818",
+  "lightColor": "#32af7e",
+  "darkColor": "#f4f7ed",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "introduction",
+              "how-it-works",
+              "prerequisites"
+            ]
+          },
+          {
+            "group": "Attack Walkthrough",
+            "pages": [
+              "walkthrough/prepare-sdi",
+              "walkthrough/modify-bcd",
+              "walkthrough/usb-boot",
+              "walkthrough/pxe-boot"
+            ]
+          },
+          {
+            "group": "SDI Tooling",
+            "pages": [
+              "tools/patch-sdi",
+              "tools/parse-sdi"
+            ]
+          },
+          {
+            "group": "Defense & Research",
+            "pages": [
+              "defense/unexploitable-cases",
+              "defense/mitigations",
+              "defense/credits"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Boot manager downgrade attack exploiting CVE-2025-48804",
+    "USB boot delivery method (FAT32 stick, no extra tooling)",
+    "PXE boot delivery method via dnsmasq on Linux",
+    "patch_sdi.py script to build a custom boot.sdi with a replaced WIM",
+    "parse_sdi.py script to validate and inspect SDI file structure",
+    "Works on TPM-only and PCR 7+11 configurations while PCA 2011 is trusted",
+    "Pre-built boot_patched.sdi release with cmd.exe as WinRE launch app"
+  ],
+  "publicApiSurface": [
+    "patch_sdi.py --sdi <boot.sdi> --wim <custom_winre.wim> -o <output.sdi>",
+    "parse_sdi.py <path_to_boot.sdi>",
+    "USB directory layout: USB/EFI/Boot/bootx64.efi, USB/EFI/Microsoft/Boot/BCD, USB/sdi/boot_patched.sdi",
+    "PXE directory layout: TFTP-root/bootmgfw.efi, TFTP-root/Boot/BCD, TFTP-root/sdi/boot_patched.sdi",
+    "bcdedit /export BCD_modded",
+    "bcdedit /store BCD_modded /set {default} path ...",
+    "bcdedit /store BCD_modded /set {GUID} ramdisksdidevice boot",
+    "bcdedit /store BCD_modded /set {GUID} ramdisksdipath \\sdi\\boot_patched.sdi"
+  ]
+}

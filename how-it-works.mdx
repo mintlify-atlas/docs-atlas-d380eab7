@@ -1,0 +1,73 @@
+---
+title: "How the BitLocker Downgrade Attack Works"
+sidebarTitle: "How It Works"
+description: "A technical walkthrough of the CVE-2025-48804 boot manager downgrade chain: PCA 2011 trust, SDI ramdisk loading, and BitLocker VMK extraction."
+---
+
+This page covers the full attack chain from UEFI boot to decrypted OS volume. Understanding each stage — the Secure Boot trust model, the SDI ramdisk format, and the TPM PCR unsealing policy — is essential for both reproducing the vulnerability in an authorized environment and understanding why the recommended mitigations are effective.
+
+## The Vulnerability
+
+The July 2025 security update patches `bootmgfw.efi` to fix the SDI vulnerability tracked as CVE-2025-48804. The patched binary is signed under the **Microsoft Windows UEFI CA 2023** certificate. However, the older, unpatched copies of `bootmgfw.efi` that were signed under the legacy **Microsoft Windows PCA 2011** certificate remain cryptographically valid as long as PCA 2011 is still present as a trusted entry in the machine's Secure Boot signature database (DB).
+
+Secure Boot does not enforce a version or freshness check — it only verifies the binary's signature chain against the DB. An attacker can therefore replace the modern, patched boot manager with a pre-patch copy and the UEFI firmware will execute it without complaint. This is the downgrade: the machine boots with an older binary that contains the very vulnerability the patch was meant to fix.
+
+Systems that have applied **KB5025885** and migrated their boot manager to CA 2023 are not affected, because the pre-patch PCA 2011-signed binary would be rejected (either by the updated DB trust rules or by an explicit DBX revocation of PCA 2011).
+
+## The SDI Ramdisk
+
+The Windows Boot Manager (`bootmgfw.efi`) reads a **Boot Configuration Database (BCD)** that describes the available boot entries. One of those entries points to a WinRE (Windows Recovery Environment) ramdisk, identified by a path to an **SDI file** and a device (either a physical disk or the boot device itself).
+
+An SDI file is a container format with named binary blobs. The two relevant blobs are:
+
+- **PART / BOOT blob** — an NTFS volume image that the boot manager verifies before mounting.
+- **WIM blob** — the WinRE.wim image that is subsequently loaded as the recovery OS.
+
+The pre-patch `bootmgfw.efi` verifies the integrity of the PART/BOOT blobs but does **not** adequately verify the WIM blob. An attacker can therefore append a second, custom WIM to the SDI file (using `patch_sdi.py`) that replaces the genuine WinRE.wim with a stripped-down image in which the WinRE launch application is `cmd.exe`. The pre-patch boot manager loads the modified WIM without detecting the substitution.
+
+## BitLocker VMK Unsealing
+
+BitLocker protects the Volume Master Key (VMK) by sealing it to the TPM against a set of **Platform Configuration Register (PCR)** measurements. The default Windows 11 consumer configuration uses **PCR 7** (Secure Boot state) and **PCR 11** (BitLocker access control) for TPM-only protection.
+
+Because the downgrade uses a legitimate, PCA 2011-signed `bootmgfw.efi`, Secure Boot succeeds and PCR 7 reflects a valid, authenticated boot path — exactly as the TPM policy expects. PCR 11 is extended by the boot manager itself and likewise satisfies the sealed policy. The TPM therefore **releases the VMK without any user interaction**.
+
+With the VMK in hand, the boot manager mounts the OS volume in the decrypted ramdisk environment. When `cmd.exe` launches, the OS volume (typically `C:` or `E:`) is already decrypted and accessible. If the drive letter was not automatically assigned, `diskpart` can be used to assign one.
+
+## Attack Flow
+
+<Steps>
+  <Step title="Prepare the attack media">
+    The attacker builds or downloads `boot_patched.sdi` (a custom SDI containing a WIM that launches `cmd.exe`) and creates a modified BCD that points the WinRE device options entry to `\sdi\boot_patched.sdi` on the boot device. The BCD and SDI are placed on a FAT32 USB stick or a TFTP server alongside the pre-patch `bootmgfw.efi`.
+  </Step>
+  <Step title="Target boots the pre-patch bootmgfw.efi">
+    The target machine is directed to boot from the USB stick or over PXE. UEFI loads the pre-patch `bootmgfw.efi` from the attacker-controlled media. Because the binary is signed under PCA 2011, which the target's Secure Boot DB still trusts, the firmware executes it without error.
+  </Step>
+  <Step title="Boot manager reads the modified BCD">
+    The pre-patch boot manager reads the modified BCD from `EFI/Microsoft/Boot/BCD` (USB) or `Boot/BCD` (PXE) and locates the WinRE entry, which references `boot_patched.sdi` on the boot device.
+  </Step>
+  <Step title="SDI file is transferred and loaded">
+    The boot manager fetches `boot_patched.sdi` (~300 MB). A recovery-related message with the SDI path appears on the target screen during the transfer. The boot manager verifies the PART/BOOT blobs (which are intact and valid) but loads the appended custom WIM blob without detecting the substitution.
+  </Step>
+  <Step title="TPM unseals the BitLocker VMK">
+    Because the boot path used a legitimate (though old) PCA 2011-signed `bootmgfw.efi`, PCR 7 and PCR 11 measurements satisfy the TPM's sealed policy. The TPM releases the VMK and the boot manager decrypts the OS volume.
+  </Step>
+  <Step title="cmd.exe opens on the decrypted volume">
+    The modified WinRE launches `cmd.exe` instead of the genuine recovery UI. The OS volume is decrypted and mounted. The attacker has full read/write access to the file system contents without knowing the BitLocker recovery key.
+  </Step>
+</Steps>
+
+## Affected Configurations
+
+| Configuration | Affected |
+|---|---|
+| TPM-only (PCR 7 + 11) | ✅ Yes |
+| TPM + PIN (PIN known) | ⚠️ Partial — blue screen at boot; type the PIN blindly and press Enter |
+| TPM + PIN (PIN unknown) | ❌ No |
+| TPM + key file | ❌ No |
+| KB5025885 / CA 2023 migrated | ❌ No |
+| PCR 0, 2, or 4 in policy | ❌ No |
+| PCA 2011 revoked via DBX | ❌ No |
+
+<Note>
+  This research builds entirely on the original BitUnlocker work by **Microsoft STORM** (Netanel Ben Simon and Alon Leviev). See their full write-up: [BitUnlocker: Leveraging Windows Recovery to Extract BitLocker Secrets](https://techcommunity.microsoft.com/blog/microsoft-security-blog/bitunlocker-leveraging-windows-recovery-to-extract-bitlocker-secrets/4442806).
+</Note>
