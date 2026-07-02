@@ -1,7 +1,7 @@
 ---
 title: "BitUnlocker: CVE-2025-48804 BitLocker Downgrade Attack"
 sidebarTitle: "Introduction"
-description: "BitUnlocker is a PoC downgrade attack that accesses BitLocker-encrypted disks in under 5 minutes on fully patched Windows 11 by exploiting a signed pre-patch boot manager."
+description: "Overview of BitUnlocker: CVE-2025-48804 scope, attack prerequisites, delivery methods, and SDI tooling for authorized BitLocker security research."
 ---
 
 BitUnlocker is a proof-of-concept tool that demonstrates how a boot manager downgrade attack can access BitLocker-encrypted disks **in under 5 minutes** on fully patched Windows 11 machines. It is intended for security researchers and penetration testers who need to understand, reproduce, and ultimately mitigate the class of vulnerability described in CVE-2025-48804. By leveraging a legitimately signed but pre-patch boot manager binary, an attacker with physical access can bypass BitLocker without knowing the recovery key — exposing the full OS volume via a modified WinRE environment.

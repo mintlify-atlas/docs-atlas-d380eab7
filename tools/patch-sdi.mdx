@@ -95,17 +95,17 @@ patch_sdi.py --sdi <path> --wim <path> [-o <output>]
 ## Example output
 
 ```text
-[*] Stock SDI     : boot.sdi (5242880 bytes, 0x500000)
+[*] Stock SDI     : boot.sdi (5243000 bytes, 0x500078)
 [*] Custom WIM    : custom_winre.wim (314572800 bytes, 300.0 MiB)
 [*] Stock blob table:
     PART entry #0 : offset=0x2000, size=0x4fe000 (5234688 bytes)
-    WIM  entry #1 : offset=0x2000, size=0x4fe000 (5234688 bytes)
+    WIM  entry #1 : offset=0x500000, size=0x12c00000 (314572800 bytes)
 
 [*] Patch plan:
-    Append custom WIM at file offset 0x501000 (after 4096 bytes padding)
+    Append custom WIM at file offset 0x501000 (after 3976 bytes padding)
     Set WIM blob offset to 0x501000 (= position in ramdisk buffer)
     Set WIM blob size to 0x12c00000 (314572800 bytes)
-    New file size: 319819776 bytes (304.9 MiB)
+    New file size: 319819776 bytes (305.0 MiB)
 
 [*] Copying stock SDI to boot_patched.sdi...
 [*] Appending custom WIM...

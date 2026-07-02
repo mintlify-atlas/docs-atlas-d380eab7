@@ -1,7 +1,7 @@
 ---
 title: "Mitigating the CVE-2025-48804 BitLocker Downgrade Attack"
 sidebarTitle: "Mitigations"
-description: "How to protect Windows systems from CVE-2025-48804: enable TPM+PIN, apply KB5025885, migrate to Windows UEFI CA 2023, and review BitLocker PCR policy."
+description: "How to protect Windows systems from CVE-2025-48804: enable TPM+PIN as an immediate compensating control and migrate to Windows UEFI CA 2023 via KB5025885."
 ---
 
 Several mitigations can prevent the BitUnlocker downgrade attack from succeeding. They range from short-term operational controls — such as enabling a TPM startup PIN — to long-term remediation that closes the underlying vulnerability by migrating the EFI boot manager to a CA 2023-signed binary and revoking trust in the old PCA 2011 certificate. Organizations should prioritize the CA 2023 migration as the definitive fix, while using TPM+PIN as an immediate compensating control for systems that cannot be patched right away.
@@ -12,14 +12,8 @@ Several mitigations can prevent the BitUnlocker downgrade attack from succeeding
   <Card title="Enable TPM + PIN" icon="lock">
     Configuring BitLocker with a pre-boot startup PIN prevents the TPM from unsealing the VMK without user interaction at boot, regardless of which boot manager loads. Even if an attacker successfully delivers the patched SDI, the PIN challenge will block access to the encrypted volume. Note that a PIN alone will not stop an insider who already knows it — additional mitigations should be layered for high-risk environments.
   </Card>
-  <Card title="Apply KB5025885" icon="shield-check">
-    Install KB5025885 and complete the three-phase Secure Boot migration to revoke trust in the old PCA 2011-signed boot manager. Once revoked, the downgrade binary that BitUnlocker relies on cannot execute — Secure Boot will reject it before any SDI transfer begins.
-  </Card>
-  <Card title="Migrate to CA 2023" icon="certificate">
-    Migrate the `bootmgfw.efi` on the EFI partition to a binary signed under the Windows UEFI CA 2023 certificate. Systems freshly installed since early 2026 likely ship with a CA 2023-signed boot manager by default. On older systems, the KB5025885 migration process performs this update as part of its third phase.
-  </Card>
-  <Card title="Review PCR Policy" icon="microchip">
-    Including PCR 0, 2, or 4 in the BitLocker PCR validation profile means any change to firmware state or boot configuration — including a boot manager downgrade — will alter those PCR measurements and prevent the TPM from unsealing the VMK. Review the active PCR policy with `manage-bde -protectors -get C:` and extend it to cover these registers if not already present.
+  <Card title="Migrate to CA 2023 via KB5025885" icon="shield-check">
+    Apply KB5025885 and complete the Secure Boot migration to move `bootmgfw.efi` on the EFI partition to a binary signed under the Windows UEFI CA 2023 certificate. Once migrated, Secure Boot rejects the old PCA 2011-signed binary that BitUnlocker relies on. Systems freshly installed since early 2026 likely ship with a CA 2023-signed boot manager by default.
   </Card>
 </CardGroup>
 
@@ -33,7 +27,7 @@ TPM+PIN alone does not prevent an insider with PIN knowledge from carrying out t
 
 BitLocker startup PIN support requires a Group Policy change before it can be configured on most Windows 11 systems. Open the Group Policy Editor (`gpedit.msc`) and navigate to:
 
-```
+```text
 Computer Configuration
   → Administrative Templates
     → Windows Components

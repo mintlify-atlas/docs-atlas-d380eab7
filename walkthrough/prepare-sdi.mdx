@@ -1,7 +1,7 @@
 ---
-title: "Prepare the Patched SDI File for BitUnlocker"
+title: "Build or Download boot_patched.sdi for BitUnlocker"
 sidebarTitle: "Prepare SDI"
-description: "How to obtain or build the boot_patched.sdi file used by BitUnlocker: download from Releases or build with patch_sdi.py from a stock boot.sdi and WinRE.wim."
+description: "How to obtain or build boot_patched.sdi for BitUnlocker: download from Releases or build with patch_sdi.py from a stock boot.sdi and WinRE.wim."
 ---
 
 `boot_patched.sdi` is the core of the BitUnlocker attack. It is a Windows SDI (System Deployment Image) ramdisk image containing a modified WIM that launches `cmd.exe` in place of the real Windows Recovery Environment. When the boot manager loads this image instead of the legitimate `boot.sdi`, the target machine boots into an unrestricted command prompt with the BitLocker-protected volume already decrypted by the TPM.
